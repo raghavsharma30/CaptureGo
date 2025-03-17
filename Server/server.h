@@ -1,25 +1,23 @@
 #ifndef SERVER_H
 #define SERVER_H
-#include "games.h"
-#include"network.h"
-#include<thread> 
-#include<mutex>
-#include<condition_variable>
+#include "game.h"
+#include "network.h"
+#include <queue>
+#include <vector>
+#include <thread>
+#include <mutex>
 using namespace std;
-
-class GameServer{
+class GameServer {
 private:
-	Network network;
-	int serverSocket;
-	int clientSockets[2];
-	Game game;
-	mutex gameMutex;
-	condition_variable mainCv;
-	string currentMove;
-	bool moveReady;
-}
+    Network network;
+    int serverSocket;
+    queue<int> waitingClients;
+    vector<thread> gameThreads;
+    mutex queueMutex;
+
 public:
-	GameServer(int port);
-	void run();
+    GameServer(int port);
+    void run();
+    void startGame(int client1, int client2);
 };
 #endif
