@@ -17,3 +17,11 @@ A networked, multiplayer Capture Go game built in C++. Play as a human or AI on 
    ```bash
    git clone https://github.com/raghavsharma30/CaptureGo.git
    cd CaptureGo
+2. **Build or Compile all files**:
+   ```bash
+   make clean
+   make
+3. **Run client and server**:
+   ```bash
+   ./server
+   ./client
