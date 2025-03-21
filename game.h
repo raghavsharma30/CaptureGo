@@ -1,36 +1,54 @@
 #ifndef GAME_H
 #define GAME_H
+#include <vector>
+#include <unordered_set>
+#include <queue>
 #include <string>
-#include <set>
-#include <utility>
 using namespace std;
-enum class Player { NONE, BLACK, WHITE };
-const int BOARD_SIZE = 7;
-
-class Game {
+enum class Piece {
+    NONE,
+    WHITE,
+    BLACK
+};
+struct Point {
+    int x, y;
+    Point(int x, int y) : x(x), y(y) {}
+    bool operator==(const Point& other) const { return x == other.x && y == other.y; }
+};
+namespace std {
+    template<> struct hash<Point> {
+        size_t operator()(const Point& p) const { return hash<int>()(p.x) ^ hash<int>()(p.y); }
+    };
+}
+class ChainAndLiberties {
 private:
-    Player** board;
-    Player currentTurn;
-    int blackCaptures;
-    int whiteCaptures;
-    bool gameover;
-    Player winner;
-    int captureGoal;
-    int countLiberties(int x, int y, set<pair<int, int>>& visited, Player player);
+    vector<Point> chain;
+    unordered_set<Point> liberties;
+    Piece piece;
 
 public:
-    Game(int goal = 5);
-    ~Game();
-    bool isValidMove(int x, int y, Player player);
-    void captureStones(int x, int y, Player opponent);
-    void switchTurn();
-    bool makeMove(int x, int y);
-    void displayBoard() const;
-    string serialize() const;
-    void deserialize(const string& state);
-    pair<int, int>* getEmptyPositions(int& count) const;
-    bool isGameOver() const { return gameover; }
-    Player getCurrentTurn() const { return currentTurn; }
+    ChainAndLiberties(const vector<Point>& chain, const unordered_set<Point>& liberties, Piece piece) : chain(chain), liberties(liberties), piece(piece) {}
+    const vector<Point>& getChain() const { return chain; }
+    const unordered_set<Point>& getLiberties() const { return liberties; }
+    Piece getPiece() const { return piece; }
+
+    void print() const;
+};
+class Board {
+private:
+    static const int DIMENSION = 7;
+    vector<vector<Piece>> grid;
+
+    void findChainAndLiberties(int x, int y, Piece piece, vector<vector<bool>>& visited, vector<Point>& chain, unordered_set<Point>& liberties) const;
+public:
+    Board();
+
+    void printBoard() const;
+    bool checkMove(int x, int y) const;
+    bool makeMove(int x, int y, Piece p);
+    bool makeMove(int move, Piece p);
+    vector<ChainAndLiberties> listChainsAndLiberties() const;
+    Piece getWinner() const;
 };
 
 #endif
