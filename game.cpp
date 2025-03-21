@@ -1,170 +1,88 @@
 #include "game.h"
 #include <iostream>
-#include <string>
-#include <utility>
+#include <iomanip>
 using namespace std;
-Game::Game(int goal) : currentTurn(Player::BLACK), blackCaptures(0), whiteCaptures(0), gameover(false), winner(Player::NONE), captureGoal(goal) {
-    board = new Player*[BOARD_SIZE];
-    for (int i = 0; i < BOARD_SIZE; i++) {
-        board[i] = new Player[BOARD_SIZE];
-        for (int j = 0; j < BOARD_SIZE; j++) {
-            board[i][j] = Player::NONE;
+void ChainAndLiberties::print() const {
+    cout << (piece == Piece::BLACK ? "Black" : "White") << " Chain: ";
+    for (const auto& p : chain) {
+        cout << "(" << p.x << ", " << p.y << ") ";
+    }
+    cout << ", Liberties: " << liberties.size() << "\n";
+}
+Board::Board() : grid(DIMENSION, vector<Piece>(DIMENSION, Piece::NONE)) {}
+void Board::printBoard() const {
+    cout << "\n   ";
+    for (int col = 1; col <= DIMENSION; ++col) {
+        cout << setw(2) << col << " ";
+    }
+    cout << "\n";
+    for (int row = 0; row < DIMENSION; ++row) {
+        cout << setw(2) << (row + 1) << " ";
+        for (int col = 0; col < DIMENSION; ++col) {
+            char symbol = grid[row][col] == Piece::BLACK ? 'B' : (grid[row][col] == Piece::WHITE ? 'W' : '0');
+            cout << setw(2) << symbol << " ";
         }
+        cout << "\n";
     }
 }
-Game::~Game() {
-    for (int i = 0; i < BOARD_SIZE; i++) {
-        delete[] board[i];
-    }
-    delete[] board;
+bool Board::checkMove(int x, int y) const {
+    return x >= 0 && x < DIMENSION && y >= 0 && y < DIMENSION && grid[x][y] == Piece::NONE;
 }
-
-int Game::countLiberties(int x, int y, set<pair<int, int>>& visited, Player player) {
-    if (x < 0 || x >= BOARD_SIZE || y < 0 || y >= BOARD_SIZE || visited.count({x, y}))
-        return 0;
-    if (board[x][y] == Player::NONE)
-        return 1;
-    if (board[x][y] != player)
-        return 0;
-    visited.insert({x, y});
-    int liberties = 0;
-    liberties += countLiberties(x + 1, y, visited, player);
-    liberties += countLiberties(x - 1, y, visited, player);
-    liberties += countLiberties(x, y + 1, visited, player);
-    liberties += countLiberties(x, y - 1, visited, player);
-    return liberties;
+bool Board::makeMove(int x, int y, Piece p) {
+    if (checkMove(x, y)) {
+        grid[x][y] = p;
+        return true;
+    }
+    return false;
 }
-bool Game::isValidMove(int x, int y, Player player) {
-    if (x < 0 || x >= BOARD_SIZE || y < 0 || y >= BOARD_SIZE || board[x][y] != Player::NONE)
-        return false;
-    board[x][y] = player;
-    set<pair<int, int>> visited;
-    int liberties = countLiberties(x, y, visited, player);
-    board[x][y] = Player::NONE;
-    return liberties > 0;
+bool Board::makeMove(int move, Piece p) {
+    int x = move / DIMENSION;
+    int y = move % DIMENSION;
+    return makeMove(x, y, p);
 }
-void Game::captureStones(int x, int y, Player opponent) {
-    if (x < 0 || x >= BOARD_SIZE || y < 0 || y >= BOARD_SIZE || board[x][y] != opponent)
-        return;
-    set<pair<int, int>> visited;
-    if (countLiberties(x, y, visited, opponent) == 0) {
-        for (const auto& pos : visited) {
-            board[pos.first][pos.second] = Player::NONE;
-            if (opponent == Player::BLACK)
-                whiteCaptures++;
-            else if (opponent == Player::WHITE)
-                blackCaptures++;
-        }
-    }
-}
-void Game::switchTurn() {
-    currentTurn = (currentTurn == Player::BLACK ? Player::WHITE : Player::BLACK);
-}
-bool Game::makeMove(int x, int y) {
-    if (gameover || !isValidMove(x, y, currentTurn))
-        return false;
-    board[x][y] = currentTurn;
-    Player opponent = (currentTurn == Player::BLACK ? Player::WHITE : Player::BLACK);
-    captureStones(x + 1, y, opponent);
-    captureStones(x - 1, y, opponent);
-    captureStones(x, y + 1, opponent);
-    captureStones(x, y - 1, opponent);
-    if (currentTurn == Player::BLACK && blackCaptures >= 1) {
-        gameover = true;
-        winner = Player::BLACK;
-    }
-    else if (currentTurn == Player::WHITE && whiteCaptures >= 1) {
-        gameover = true;
-        winner = Player::WHITE;
-    }
-    if (!gameover) {
-        switchTurn();
-    }
-    return true;
-}
-void Game::displayBoard() const {
-    cout << "  ";
-    for (int j = 0; j < BOARD_SIZE; j++) cout << j << " ";
-    cout << "\n +";
-    for (int j = 0; j < BOARD_SIZE; j++) cout << "--";
-    cout << "+\n";
-    for (int i = 0; i < BOARD_SIZE; i++) { 
-        cout << i << "|";
-        for (int j = 0; j < BOARD_SIZE; j++) {
-            char c = (board[i][j] == Player::NONE ? '0' : (board[i][j] == Player::BLACK ? 'B' : 'W'));
-            cout << c << " ";
-        }
-        cout << "|\n";
-    }
-    cout << " +";
-    for (int j = 0; j < BOARD_SIZE; j++) cout << "--";
-    cout << "+\n";
-    cout << "Current Turn: " << (currentTurn == Player::BLACK ? "BLACK" : "WHITE") << "\n";
-    cout << "Black captures: " << blackCaptures << ", White captures: " << whiteCaptures << "\n"; 
-    if (gameover) {
-        cout << "Game Over! Winner: " << (winner == Player::BLACK ? "BLACK" : "WHITE") << "\n";
-    }
-}
-string Game::serialize() const {
-    string result;
-    result += (currentTurn == Player::BLACK ? "BLACK" : "WHITE") + string("\n");
-    for (int i = 0; i < BOARD_SIZE; i++) {
-        for (int j = 0; j < BOARD_SIZE; j++) { 
-            if (board[i][j] == Player::NONE) result += "0";
-            else if (board[i][j] == Player::BLACK) result += "1";
-            else result += "2";
-        }
-        result += "\n";
-    }
-    result += to_string(blackCaptures) + " " + to_string(whiteCaptures) + "\n"; 
-    result += to_string(gameover ? 1 : 0) + " " + to_string(winner == Player::NONE ? 0 : (winner == Player::BLACK ? 1 : 2)) + "\n";
-    return result;
-}
-void Game::deserialize(const string& state) {
-    size_t pos = 0;
-    auto getNextLine = [&state, &pos]() -> string {
-        size_t end = state.find('\n', pos);
-        if (end == string::npos) return "";
-        string line = state.substr(pos, end - pos);
-        pos = end + 1;
-        return line;
-    };
-    string line = getNextLine();
-    currentTurn = (line == "BLACK" ? Player::BLACK : Player::WHITE);
-    for (int i = 0; i < BOARD_SIZE; i++) {
-        line = getNextLine();
-        for (int j = 0; j < BOARD_SIZE; j++) {
-            char cell = line[j];
-            board[i][j] = (cell == '0' ? Player::NONE : (cell == '1' ? Player::BLACK : Player::WHITE));
-        }
-    }
-    line = getNextLine();
-    size_t spacePos = line.find(' ');
-    blackCaptures = stoi(line.substr(0, spacePos));
-    whiteCaptures = stoi(line.substr(spacePos + 1));
-    line = getNextLine();
-    spacePos = line.find(' ');
-    gameover = (line.substr(0, spacePos) == "1");
-    int win = stoi(line.substr(spacePos + 1));
-    winner = (win == 0 ? Player::NONE : (win == 1 ? Player::BLACK : Player::WHITE));
-}
-
-pair<int, int>* Game::getEmptyPositions(int& count) const {
-    count = 0;
-    for (int i = 0; i < BOARD_SIZE; i++) {
-        for (int j = 0; j < BOARD_SIZE; j++) {
-            if (board[i][j] == Player::NONE) count++;
-        }
-    }
-    pair<int, int>* emptyPositions = new pair<int, int>[count];
-    int idx = 0;
-    for (int i = 0; i < BOARD_SIZE; i++) {
-        for (int j = 0; j < BOARD_SIZE; j++) {
-            if (board[i][j] == Player::NONE) {
-                emptyPositions[idx] = {i, j}; 
-                idx++;
+void Board::findChainAndLiberties(int x, int y, Piece piece, vector<vector<bool>>& visited, vector<Point>& chain, unordered_set<Point>& liberties) const {
+    vector<pair<int, int>> directions = {{-1, 0}, {1, 0}, {0, -1}, {0, 1}};
+    queue<Point> queue;
+    queue.push(Point(x, y));
+    visited[x][y] = true;
+    while (!queue.empty()) {
+        Point current = queue.front();
+        queue.pop();
+        chain.push_back(current);
+        for (const auto& dir : directions) {
+            int newX = current.x + dir.first;
+            int newY = current.y + dir.second;
+            if (newX >= 0 && newX < DIMENSION && newY >= 0 && newY < DIMENSION) {
+                if (grid[newX][newY] == piece && !visited[newX][newY]) {
+                    visited[newX][newY] = true;
+                    queue.push(Point(newX, newY));
+                } else if (grid[newX][newY] == Piece::NONE) {
+                    liberties.insert(Point(newX, newY));
+                }
             }
         }
     }
-    return emptyPositions;
+}
+vector<ChainAndLiberties> Board::listChainsAndLiberties() const {
+    vector<ChainAndLiberties> result;
+    vector<vector<bool>> visited(DIMENSION, vector<bool>(DIMENSION, false));
+    for (int i = 0; i < DIMENSION; ++i) {
+        for (int j = 0; j < DIMENSION; ++j) {
+            if (!visited[i][j] && grid[i][j] != Piece::NONE) {
+                vector<Point> chain;
+                unordered_set<Point> liberties;
+                findChainAndLiberties(i, j, grid[i][j], visited, chain, liberties);
+                result.emplace_back(chain, liberties, grid[i][j]);
+            }
+        }
+    }
+    return result;
+}
+Piece Board::getWinner() const {
+    for (const auto& chain : listChainsAndLiberties()) {
+        if (chain.getLiberties().empty()) {
+            return chain.getPiece() == Piece::BLACK ? Piece::WHITE : Piece::BLACK;
+        }
+    }
+    return Piece::NONE;
 }
