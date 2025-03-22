@@ -2,27 +2,51 @@
 #define SERVER_H
 #include "game.h"
 #include "network.h"
-#include <queue>
 #include <vector>
-#include <thread>
+#include <queue>
 #include <mutex>
-#include <set>
-#include <map>
+#include <condition_variable>
 using namespace std;
-class GameServer {
+class Player {
 private:
-    Network network;
-    int serverSocket;
-    queue<int> waitingClients;
-    vector<thread> gameThreads;
-    mutex queueMutex;
-    set<int> connectedClients;
-    void handleClient(int clientSocket, map<int, string>& clientUsernames);
-
+    Piece piece;
+    string username;
+    int socket;
+    mutex mtx;
+    condition_variable cv;
 public:
-    GameServer(int port);
-    void run();
-    void startGame(int client1, int client2);
+    Player(int socket, const string& username) : socket(socket), username(username), piece(Piece::NONE) {}
+    Player(int socket, const string& username, Piece piece) : socket(socket), username(username), piece(piece) {}
+    string getUsername() const { return username; }
+    Piece getPiece() const { return piece; }
+    Piece getOpponentPiece() const { return piece == Piece::BLACK ? Piece::WHITE : Piece::BLACK; }
+    void setPiece(Piece piece) { this->piece = piece; }
+    int getSocket() const { return socket; }
+    mutex& getMutex() { return mtx; }
+    condition_variable& getCondition() { return cv; }
 };
-
+class Game {
+private:
+    int currentPlayer;
+    Board board;
+    Player* players[2];
+    int sockets[2];
+public:
+    Game(Player* p1, Player* p2);
+    void run();
+};
+class Server {
+private:
+    vector<Player*> connectedPlayers;
+    queue<Player*> gameQueue;
+    mutex queueMutex;
+    condition_variable queueCond;
+    void processQueue();
+    Game* waitForPlayers();
+    void startGame(Game* game);
+    void handleClient(int sock);
+public:
+    static bool isPortInUse(int port);
+    void run();
+};
 #endif
