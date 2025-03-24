@@ -13,11 +13,15 @@ enum class Piece {
 struct Point {
     int x, y;
     Point(int x, int y) : x(x), y(y) {}
-    bool operator==(const Point& other) const { return x == other.x && y == other.y; }
+    bool operator==(const Point& other) const {
+    return x == other.x && y == other.y; 
+    }
 };
 namespace std {
     template<> struct hash<Point> {
-        size_t operator()(const Point& p) const { return hash<int>()(p.x) ^ hash<int>()(p.y); }
+        size_t operator()(const Point& p) const { 
+        return hash<int>()(p.x) ^ hash<int>()(p.y); 
+        }
     };
 }
 class ChainAndLiberties {
@@ -29,7 +33,9 @@ private:
 public:
     ChainAndLiberties(const vector<Point>& chain, const unordered_set<Point>& liberties, Piece piece) : chain(chain), liberties(liberties), piece(piece) {}
     const vector<Point>& getChain() const { return chain; }
-    const unordered_set<Point>& getLiberties() const { return liberties; }
+    const unordered_set<Point>& getLiberties() const { 
+    return liberties; 
+    }
     Piece getPiece() const { return piece; }
 
     void print() const;
@@ -50,5 +56,4 @@ public:
     vector<ChainAndLiberties> listChainsAndLiberties() const;
     Piece getWinner() const;
 };
-
 #endif

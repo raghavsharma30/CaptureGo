@@ -1,7 +1,7 @@
 #include "server.h"
 using namespace std;
 int main() {
-    GameServer server(8080);
+    Server server;
     server.run();
     return 0;
 }
