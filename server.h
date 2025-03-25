@@ -7,6 +7,7 @@
 #include <mutex>
 #include <condition_variable>
 using namespace std;
+
 class Player {
 private:
     Piece piece;
@@ -15,8 +16,8 @@ private:
     mutex mtx;
     condition_variable cv;
 public:
-    Player(int socket, const string& username) : socket(socket), username(username), piece(Piece::NONE) {}
-    Player(int socket, const string& username, Piece piece) : socket(socket), username(username), piece(piece) {}
+    Player(int socket, const string& username) : piece(Piece::NONE), username(username), socket(socket) {}
+    Player(int socket, const string& username, Piece piece) : piece(piece), username(username), socket(socket) {}
     string getUsername() const { return username; }
     Piece getPiece() const { return piece; }
     Piece getOpponentPiece() const { return piece == Piece::BLACK ? Piece::WHITE : Piece::BLACK; }
@@ -25,6 +26,7 @@ public:
     mutex& getMutex() { return mtx; }
     condition_variable& getCondition() { return cv; }
 };
+
 class Game {
 private:
     int currentPlayer;
@@ -35,6 +37,7 @@ public:
     Game(Player* p1, Player* p2);
     void run();
 };
+
 class Server {
 private:
     vector<Player*> connectedPlayers;

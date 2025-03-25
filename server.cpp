@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <string.h>
 using namespace std;
+
 Game::Game(Player* p1, Player* p2) {
     players[0] = p1;
     players[1] = p2;
@@ -20,6 +21,7 @@ Game::Game(Player* p1, Player* p2) {
     Network::sendData(sockets[1], msg);
     currentPlayer = 0;
 }
+
 void Game::run() {
     unique_lock<mutex> lock1(players[0]->getMutex(), defer_lock);
     unique_lock<mutex> lock2(players[1]->getMutex(), defer_lock);
@@ -53,12 +55,14 @@ void Game::run() {
     players[0]->getCondition().notify_one();
     players[1]->getCondition().notify_one();
 }
+
 void Server::processQueue() {
     while (true) {
         Game* game = waitForPlayers();
         if (game) startGame(game);
     }
 }
+
 Game* Server::waitForPlayers() {
     unique_lock<mutex> lock(queueMutex);
     queueCond.wait(lock, [this] { return gameQueue.size() >= 2; });
@@ -67,12 +71,14 @@ Game* Server::waitForPlayers() {
     cout << "Game started between " << p1->getUsername() << " and " << p2->getUsername() << "\n";
     return new Game(p1, p2);
 }
+
 void Server::startGame(Game* game) {
     thread([game] {
         game->run();
         delete game;
     }).detach();
 }
+
 void Server::handleClient(int sock) {
     Player* player = nullptr;
     while (true) {
@@ -124,11 +130,14 @@ void Server::handleClient(int sock) {
         }
     }
     if (player) {
-        connectedPlayers.erase(remove_if(connectedPlayers.begin(), connectedPlayers.end(), [player](Player* p) { return p == player; }), connectedPlayers.end());
+        connectedPlayers.erase(remove_if(connectedPlayers.begin(), connectedPlayers.end(), 
+                                         [player](Player* p) { return p == player; }), 
+                               connectedPlayers.end());
         delete player;
     }
     Network::closeSocket(sock);
 }
+
 bool Server::isPortInUse(int port) {
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
@@ -143,6 +152,7 @@ bool Server::isPortInUse(int port) {
     close(sock);
     return result < 0;
 }
+
 void Server::run() {
     int port = 8081;
     string input;

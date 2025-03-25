@@ -2,41 +2,135 @@
 #include <iostream>
 #include <chrono>
 using namespace std;
-int HumanPlayer::getMove(const Board& b) {
-    while (true) {
-        cout << "Enter move as x,y (e.g., 4,4): ";
-        string input;
-        getline(cin, input);
-        input.erase(0, input.find_first_not_of(" \t"));
-        input.erase(input.find_last_not_of(" \t") + 1);
-        size_t comma = input.find(',');
-        if (comma == string::npos) {
-            cout << "Invalid format! Use x,y, e.g., 4,4.\n";
-            continue;
-        }
-        try {
-            string rowStr = input.substr(0, comma);
-            string colStr = input.substr(comma + 1);
-            rowStr.erase(0, rowStr.find_first_not_of(" \t"));
-            rowStr.erase(rowStr.find_last_not_of(" \t") + 1);
-            colStr.erase(0, colStr.find_first_not_of(" \t"));
-            colStr.erase(colStr.find_last_not_of(" \t") + 1);
-            int row = stoi(rowStr);
-            int col = stoi(colStr);
-            row--; col--; 
-            if (b.checkMove(row, col)) {
-                return row * 7 + col;
+
+const int WINDOW_WIDTH = 800;
+const int WINDOW_HEIGHT = 600;
+const int GRID_SIZE = 7;
+const int CELL_SIZE = 70;
+const int BOARD_OFFSET_X = (WINDOW_WIDTH - GRID_SIZE * CELL_SIZE) / 2;
+const int BOARD_OFFSET_Y = (WINDOW_HEIGHT - GRID_SIZE * CELL_SIZE) / 2;
+
+SDL_Window* window = nullptr;
+SDL_Renderer* renderer = nullptr;
+TTF_Font* font = nullptr;
+bool quit = false;
+
+int sock = -1;
+string username;
+Piece myPiece;
+bool myTurn = false;
+Board board;
+enum class GameState { DISCONNECTED, CONNECTING, CONNECTED_MENU, IN_QUEUE, IN_GAME, GAME_OVER };
+GameState state = GameState::DISCONNECTED;
+bool isAI = false;
+string opponentName;
+
+// Forward declaration of helper function
+Piece getOpponentPiece(Piece piece);
+
+bool initSDL() {
+    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+        cerr << "SDL could not initialize! SDL_Error: " << SDL_GetError() << "\n";
+        return false;
+    }
+    window = SDL_CreateWindow("Capture Go", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 
+                              WINDOW_WIDTH, WINDOW_HEIGHT, SDL_WINDOW_SHOWN);
+    if (!window) {
+        cerr << "Window could not be created! SDL_Error: " << SDL_GetError() << "\n";
+        return false;
+    }
+    renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
+    if (!renderer) {
+        cerr << "Renderer could not be created! SDL_Error: " << SDL_GetError() << "\n";
+        return false;
+    }
+    if (TTF_Init() == -1) {
+        cerr << "SDL_ttf could not initialize! TTF_Error: " << TTF_GetError() << "\n";
+        return false;
+    }
+    font = TTF_OpenFont("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 24); // Adjust path if needed
+    if (!font) {
+        cerr << "Failed to load font! TTF_Error: " << TTF_GetError() << "\n";
+        return false;
+    }
+    ImGui::CreateContext();
+    ImGui_ImplSDL2_InitForSDLRenderer(window, renderer);
+    ImGui_ImplSDLRenderer2_Init(renderer);
+    return true;
+}
+
+void closeSDL() {
+    ImGui_ImplSDLRenderer2_Shutdown();
+    ImGui_ImplSDL2_Shutdown();
+    ImGui::DestroyContext();
+    TTF_CloseFont(font);
+    TTF_Quit();
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
+    SDL_Quit();
+}
+
+void drawBoard(const Board& board) {
+    SDL_SetRenderDrawColor(renderer, 245, 222, 179, 255); // Wheat color
+    SDL_RenderClear(renderer);
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255); // Black lines
+    for (int i = 0; i <= GRID_SIZE; i++) {
+        SDL_RenderDrawLine(renderer, BOARD_OFFSET_X, BOARD_OFFSET_Y + i * CELL_SIZE, 
+                           BOARD_OFFSET_X + GRID_SIZE * CELL_SIZE, BOARD_OFFSET_Y + i * CELL_SIZE);
+        SDL_RenderDrawLine(renderer, BOARD_OFFSET_X + i * CELL_SIZE, BOARD_OFFSET_Y, 
+                           BOARD_OFFSET_X + i * CELL_SIZE, BOARD_OFFSET_Y + GRID_SIZE * CELL_SIZE);
+    }
+    for (int row = 0; row < GRID_SIZE; row++) {
+        for (int col = 0; col < GRID_SIZE; col++) {
+            Piece piece = board.getPiece(row, col);
+            if (piece != Piece::NONE) {
+                int x = BOARD_OFFSET_X + col * CELL_SIZE + CELL_SIZE / 2;
+                int y = BOARD_OFFSET_Y + row * CELL_SIZE + CELL_SIZE / 2;
+                SDL_SetRenderDrawColor(renderer, piece == Piece::BLACK ? 0 : 255, 
+                                       piece == Piece::BLACK ? 0 : 255, piece == Piece::BLACK ? 0 : 255, 255);
+                SDL_Rect circle = {x - CELL_SIZE / 3, y - CELL_SIZE / 3, CELL_SIZE * 2 / 3, CELL_SIZE * 2 / 3};
+                SDL_RenderFillRect(renderer, &circle);
             }
-            cout << "Invalid move! Position must be empty and within 1-7.\n";
-        } catch (const invalid_argument&) {
-            cout << "Invalid input! Coordinates must be numbers, e.g., 4,4.\n";
-        } catch (const out_of_range&) {
-            cout << "Coordinates out of range! Use numbers between 1 and 7, e.g., 4,4.\n";
         }
     }
 }
-AIPlayer::AIPlayer(int socket, const string& username) : ClientPlayer(socket, username), rng(chrono::system_clock::now().time_since_epoch().count()) {}
-AIPlayer::AIPlayer(int socket, const string& username, Piece piece) : ClientPlayer(socket, username, piece), rng(chrono::system_clock::now().time_since_epoch().count()) {}
+
+int HumanPlayer::getMove(const Board& b) {
+    SDL_Event e;
+    while (true) {
+        while (SDL_PollEvent(&e) != 0) {
+            ImGui_ImplSDL2_ProcessEvent(&e);
+            if (e.type == SDL_QUIT) {
+                quit = true;
+                return -1;
+            } else if (e.type == SDL_MOUSEBUTTONDOWN) {
+                int x = e.button.x;
+                int y = e.button.y;
+                if (x >= BOARD_OFFSET_X && x < BOARD_OFFSET_X + GRID_SIZE * CELL_SIZE &&
+                    y >= BOARD_OFFSET_Y && y < BOARD_OFFSET_Y + GRID_SIZE * CELL_SIZE) {
+                    int col = (x - BOARD_OFFSET_X) / CELL_SIZE;
+                    int row = (y - BOARD_OFFSET_Y) / CELL_SIZE;
+                    if (b.checkMove(row, col)) {
+                        return row * 7 + col;
+                    }
+                }
+            }
+        }
+        drawBoard(b);
+        ImGui::Begin("Status");
+        ImGui::Text("Your turn as %s vs %s", piece == Piece::BLACK ? "Black" : "White", opponentName.c_str());
+        ImGui::End();
+        ImGui::Render();
+        ImGui_ImplSDLRenderer2_RenderDrawData(ImGui::GetDrawData(), renderer); // Added renderer argument
+        SDL_RenderPresent(renderer);
+        SDL_Delay(10);
+    }
+}
+
+AIPlayer::AIPlayer(int socket, const string& username) 
+    : ClientPlayer(socket, username), rng(chrono::system_clock::now().time_since_epoch().count()) {}
+AIPlayer::AIPlayer(int socket, const string& username, Piece piece) 
+    : ClientPlayer(socket, username, piece), rng(chrono::system_clock::now().time_since_epoch().count()) {}
 int AIPlayer::getMove(const Board& b) {
     auto chains = b.listChainsAndLiberties();
     const ChainAndLiberties* target = nullptr;
@@ -62,150 +156,168 @@ int AIPlayer::getMove(const Board& b) {
         return move.x * 7 + move.y;
     }
 }
-ClientGame::ClientGame(ClientPlayer* player) : player(player), sock(player->getSocket()) {
-    myTurn = player->getPiece() == Piece::BLACK;
-}
-void ClientGame::run() {
-    bool gameOver = false;
-    while (!gameOver) {
-        board.printBoard();
-        if (myTurn && board.getWinner() == Piece::NONE) {
-            cout << "Your turn as " << (player->getPiece() == Piece::BLACK ? "Black" : "White") << "\n";
-            int move = player->getMove(board);
-            Network::sendData(sock, "MOVE~" + to_string(move));
-        } else if (board.getWinner() == Piece::NONE) {
-            cout << "Opponent's turn as " << (player->getOpponentPiece() == Piece::BLACK ? "Black" : "White") << "\n";
-        } else {
-            Piece winner = board.getWinner();
-            cout << (winner == player->getPiece() ? "You won!\n" : "You lost!\n");
-            gameOver = true;
-            break;
-        }
-        string message = Network::receiveData(sock);
-        if (message.empty()) {
-            cout << "Connection lost!\n";
-            gameOver = true;
-            break;
-        }
-        auto tokens = split(message, '~');
-        if (tokens[0] == "MOVE" && myTurn) {
-            int move = stoi(tokens[1]);
-            cout << "You played: (" << (move / 7 + 1) << ", " << (move % 7 + 1) << ")\n";
-            board.makeMove(move, player->getPiece());
-            myTurn = false;
-        } else if (tokens[0] == "ERROR" && myTurn) {
-            cout << "Invalid move!\n";
-        } else if (tokens[0] == "MOVE" && !myTurn) {
-            int move = stoi(tokens[1]);
-            cout << "Opponent played: (" << (move / 7 + 1) << ", " << (move % 7 + 1) << ")\n";
-            board.makeMove(move, player->getOpponentPiece());
-            myTurn = true;
-        } else if (tokens[0] == "GAMEOVER") {
-            if (tokens[1] == "VICTORY") {
-                cout << (tokens[2] == player->getUsername() ? "You won!\n" : "You lost!\n");
-            } else if (tokens[1] == "DISCONNECT") {
-                cout << "Opponent disconnected!\n";
-            }
-            gameOver = true;
-            break;
-        }
-    }
-}
+
 void Client::run() {
-    string hostname = "127.0.0.1";
-    int port = 8081;
-    string input;
-    cout << "Enter server IP address or press enter for local host or default address : ";
-    getline(cin, input);
-    if (!input.empty()) hostname = input;
-    cout << "Enter port number or press enter for default port number (8081) : ";
-    getline(cin, input);
-    if (!input.empty()) port = stoi(input);
-    int sock = Network::createClientSocket(hostname, port);
-    if (sock == -1) {
-        cerr << "Failed to connect to server.\n";
+    if (!initSDL()) {
+        cerr << "SDL initialization failed. Exiting.\n";
         return;
     }
-    Network::sendData(sock, "HELLO~CaptureGo Client");
-    Network::receiveData(sock);
-    string username;
-    while (true) {
-        cout << "Enter username: ";
-        getline(cin, username);
-        Network::sendData(sock, "LOGIN~" + username);
-        string response = Network::receiveData(sock);
-        if (response == "LOGIN") break;
-        cout << "Username taken!\n";
-    }
-    while (true) {
-        cout << "Menu:\n"
-             << "1. List users on the server\n"
-             << "2. Enter as a player (human)\n"
-             << "3. Enter as AI\n"
-             << "4. Exit\n"
-             << "5. Players waiting for opponent\n";
-        int option = 0;
-        while (true) {
-            cout << "Option (1-5): ";
-            getline(cin, input);
-            if (input.empty()) {
-                cout << "Please enter a number between 1 and 5.\n";
-                continue;
-            }
-            try {
-                option = stoi(input);
-                if (option < 1 || option > 5) {
-                    cout << "Invalid option! Please enter a number between 1 and 5.\n";
-                    continue;
-                }
-                break;
-            } catch (const invalid_argument&) {
-                cout << "Invalid input! Please enter a number between 1 and 5.\n";
-            } catch (const out_of_range&) {
-                cout << "Number out of range! Please enter a number between 1 and 5.\n";
-            }
+
+    while (!quit) {
+        SDL_Event e;
+        while (SDL_PollEvent(&e)) {
+            ImGui_ImplSDL2_ProcessEvent(&e);
+            if (e.type == SDL_QUIT) quit = true;
         }
-        if (option == 2 || option == 3) {
-            Network::sendData(sock, "QUEUE");
-            cout << "Waiting in queue...\n";
-            string message = Network::receiveData(sock);
+
+        string message = (sock != -1) ? Network::receiveData(sock) : "";
+        if (!message.empty()) {
             auto tokens = split(message, '~');
             if (tokens[0] == "NEWGAME") {
-                Piece piece = tokens[1] == username ? Piece::BLACK : Piece::WHITE;
-                ClientPlayer* player;
-                if (option == 2) {
-                    player = new HumanPlayer(sock, username, piece);
-                } else {
-                    player = new AIPlayer(sock, username, piece);
-                }
-                cout << "You are playing as " << (piece == Piece::BLACK ? "Black" : "White") << "\n";
-                cout << "You are playing against " << (tokens[1] == username ? tokens[2] : tokens[1]) << "\n";
-                ClientGame game(player);
-                game.run();
-                delete player;
-            }
-        } else if (option == 1) {
-            Network::sendData(sock, "LIST");
-            auto tokens = split(Network::receiveData(sock), '~');
-            cout << "Connected users:\n";
-            for (size_t i = 1; i < tokens.size(); ++i) {
-                cout << i << ". " << tokens[i] << "\n";
-            }
-        } else if (option == 4) {
-            cout << "Exiting...\n";
-            break;
-        } else if (option == 5) {
-            Network::sendData(sock, "QUEUE_LIST");
-            auto tokens = split(Network::receiveData(sock), '~');
-            cout << "Players waiting for opponent:\n";
-            if (tokens.size() == 1 && tokens[0] == "QUEUE_LIST") {
-                cout << "No players in queue.\n";
-            } else {
-                for (size_t i = 1; i < tokens.size(); ++i) {
-                    cout << i << ". " << tokens[i] << "\n";
-                }
+                myPiece = tokens[1] == username ? Piece::BLACK : Piece::WHITE;
+                opponentName = tokens[1] == username ? tokens[2] : tokens[1];
+                myTurn = myPiece == Piece::BLACK;
+                state = GameState::IN_GAME;
+                board = Board(); // Reset board
+            } else if (tokens[0] == "MOVE" && state == GameState::IN_GAME) {
+                int move = stoi(tokens[1]);
+                board.makeMove(move, myTurn ? myPiece : getOpponentPiece(myPiece));
+                myTurn = !myTurn;
+            } else if (tokens[0] == "ERROR" && state == GameState::IN_GAME) {
+                ImGui::OpenPopup("Invalid Move");
+            } else if (tokens[0] == "GAMEOVER") {
+                state = GameState::GAME_OVER;
             }
         }
+
+        ImGui_ImplSDLRenderer2_NewFrame();
+        ImGui_ImplSDL2_NewFrame();
+        ImGui::NewFrame();
+
+        switch (state) {
+            case GameState::DISCONNECTED:
+                ImGui::Begin("Main Menu");
+                if (ImGui::Button("Connect to Server")) state = GameState::CONNECTING;
+                if (ImGui::Button("Exit")) quit = true;
+                ImGui::End();
+                break;
+            case GameState::CONNECTING:
+                ImGui::Begin("Connect");
+                static char ipBuf[64] = "127.0.0.1";
+                static char portBuf[64] = "8081";
+                static char userBuf[64] = "Player";
+                ImGui::InputText("IP", ipBuf, 64);
+                ImGui::InputText("Port", portBuf, 64);
+                ImGui::InputText("Username", userBuf, 64);
+                if (ImGui::Button("Connect")) {
+                    string ip = ipBuf;
+                    int port = stoi(portBuf);
+                    username = userBuf;
+                    sock = Network::createClientSocket(ip, port);
+                    if (sock != -1) {
+                        Network::sendData(sock, "HELLO~CaptureGo Client");
+                        Network::receiveData(sock);
+                        Network::sendData(sock, "LOGIN~" + username);
+                        string response = Network::receiveData(sock);
+                        if (response == "LOGIN") {
+                            state = GameState::CONNECTED_MENU;
+                        } else {
+                            ImGui::OpenPopup("Login Failed");
+                        }
+                    } else {
+                        ImGui::OpenPopup("Connection Failed");
+                    }
+                }
+                if (ImGui::BeginPopupModal("Connection Failed")) {
+                    ImGui::Text("Failed to connect to server.");
+                    if (ImGui::Button("OK")) ImGui::CloseCurrentPopup();
+                    ImGui::EndPopup();
+                }
+                if (ImGui::BeginPopupModal("Login Failed")) {
+                    ImGui::Text("Username taken or invalid.");
+                    if (ImGui::Button("OK")) ImGui::CloseCurrentPopup();
+                    ImGui::EndPopup();
+                }
+                ImGui::End();
+                break;
+            case GameState::CONNECTED_MENU:
+                ImGui::Begin("Menu");
+                if (ImGui::Button("Play as Human")) {
+                    isAI = false;
+                    Network::sendData(sock, "QUEUE");
+                    state = GameState::IN_QUEUE;
+                }
+                if (ImGui::Button("Play as AI")) {
+                    isAI = true;
+                    Network::sendData(sock, "QUEUE");
+                    state = GameState::IN_QUEUE;
+                }
+                if (ImGui::Button("Disconnect")) {
+                    Network::closeSocket(sock);
+                    sock = -1;
+                    state = GameState::DISCONNECTED;
+                }
+                ImGui::End();
+                break;
+            case GameState::IN_QUEUE:
+                ImGui::Begin("Queue");
+                ImGui::Text("Waiting for an opponent...");
+                ImGui::End();
+                break;
+            case GameState::IN_GAME:
+                drawBoard(board);
+                ImGui::Begin("Status");
+                if (myTurn) {
+                    ImGui::Text("Your turn as %s vs %s", myPiece == Piece::BLACK ? "Black" : "White", opponentName.c_str());
+                    if (isAI) {
+                        AIPlayer player(sock, username, myPiece);
+                        int move = player.getMove(board);
+                        Network::sendData(sock, "MOVE~" + to_string(move));
+                    } else {
+                        HumanPlayer player(sock, username, myPiece);
+                        int move = player.getMove(board);
+                        if (move != -1) {
+                            Network::sendData(sock, "MOVE~" + to_string(move));
+                        }
+                    }
+                } else {
+                    ImGui::Text("Opponent's turn (%s)", opponentName.c_str());
+                }
+                if (ImGui::BeginPopupModal("Invalid Move")) {
+                    ImGui::Text("Invalid move! Try again.");
+                    if (ImGui::Button("OK")) ImGui::CloseCurrentPopup();
+                    ImGui::EndPopup();
+                }
+                ImGui::End();
+                break;
+            case GameState::GAME_OVER:
+                drawBoard(board);
+                ImGui::Begin("Game Over");
+                Piece winner = board.getWinner();
+                if (winner == myPiece) {
+                    ImGui::Text("You won!");
+                } else if (winner != Piece::NONE) {
+                    ImGui::Text("You lost!");
+                } else {
+                    ImGui::Text("Game ended (disconnected?)");
+                }
+                if (ImGui::Button("Back to Menu")) state = GameState::CONNECTED_MENU;
+                ImGui::End();
+                break;
+        }
+
+        SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+        SDL_RenderClear(renderer);
+        ImGui::Render();
+        ImGui_ImplSDLRenderer2_RenderDrawData(ImGui::GetDrawData(), renderer); // Added renderer argument
+        SDL_RenderPresent(renderer);
+        SDL_Delay(16); // ~60 FPS
     }
-    Network::closeSocket(sock);
+
+    if (sock != -1) Network::closeSocket(sock);
+    closeSDL();
+}
+
+Piece getOpponentPiece(Piece piece) {
+    return piece == Piece::BLACK ? Piece::WHITE : Piece::BLACK;
 }
