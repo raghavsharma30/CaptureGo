@@ -1,62 +1,68 @@
 # Compiler and flags
 CC = g++
-CFLAGS = -std=c++17 -Wall
+CFLAGS = -std=c++17 -Wall -I/usr/include/SDL2 -Iinclude
 LDFLAGS = -lSDL2 -lSDL2_ttf -pthread
 
+# Directories
+SRC_DIR = src
+INCLUDE_DIR = include
+BUILD_DIR = build
+
 # ImGui source files
-IMGUI_FILES = imgui.cpp imgui_draw.cpp imgui_widgets.cpp imgui_tables.cpp imgui_impl_sdl2.cpp imgui_impl_sdlrenderer2.cpp
+IMGUI_FILES = $(SRC_DIR)/imgui.cpp $(SRC_DIR)/imgui_draw.cpp $(SRC_DIR)/imgui_widgets.cpp \
+              $(SRC_DIR)/imgui_tables.cpp $(SRC_DIR)/imgui_impl_sdl2.cpp $(SRC_DIR)/imgui_impl_sdlrenderer2.cpp
 
 # Targets
-all: server client
+all: $(BUILD_DIR)/server $(BUILD_DIR)/client
 
 # Server target
-server: server.o game.o network.o server_main.o
-	$(CC) server.o game.o network.o server_main.o -o server $(LDFLAGS)
+$(BUILD_DIR)/server: $(BUILD_DIR)/server.o $(BUILD_DIR)/game.o $(BUILD_DIR)/network.o $(BUILD_DIR)/server_main.o
+	$(CC) $^ -o $@ $(LDFLAGS)
 
 # Client target
-client: client.o game.o network.o client_main.o $(IMGUI_FILES)
-	$(CC) client.o game.o network.o client_main.o $(IMGUI_FILES) -o client $(LDFLAGS)
+$(BUILD_DIR)/client: $(BUILD_DIR)/client.o $(BUILD_DIR)/game.o $(BUILD_DIR)/network.o $(BUILD_DIR)/client_main.o $(IMGUI_FILES:%.cpp=$(BUILD_DIR)/%.o)
+	$(CC) $^ -o $@ $(LDFLAGS)
 
 # Object file rules
-server.o: server.cpp server.h game.h network.h
-	$(CC) $(CFLAGS) -c server.cpp
+$(BUILD_DIR)/server.o: $(SRC_DIR)/server.cpp $(INCLUDE_DIR)/server.h $(INCLUDE_DIR)/game.h $(INCLUDE_DIR)/network.h
+	$(CC) $(CFLAGS) -c $< -o $@
 
-server_main.o: server_main.cpp server.h
-	$(CC) $(CFLAGS) -c server_main.cpp
+$(BUILD_DIR)/server_main.o: $(SRC_DIR)/server_main.cpp $(INCLUDE_DIR)/server.h
+	$(CC) $(CFLAGS) -c $< -o $@
 
-client.o: client.cpp client.h game.h network.h
-	$(CC) $(CFLAGS) -c client.cpp
+$(BUILD_DIR)/client.o: $(SRC_DIR)/client.cpp $(INCLUDE_DIR)/client.h $(INCLUDE_DIR)/game.h $(INCLUDE_DIR)/network.h
+	$(CC) $(CFLAGS) -c $< -o $@
 
-client_main.o: client_main.cpp client.h
-	$(CC) $(CFLAGS) -c client_main.cpp
+$(BUILD_DIR)/client_main.o: $(SRC_DIR)/client_main.cpp $(INCLUDE_DIR)/client.h
+	$(CC) $(CFLAGS) -c $< -o $@
 
-game.o: game.cpp game.h
-	$(CC) $(CFLAGS) -c game.cpp
+$(BUILD_DIR)/game.o: $(SRC_DIR)/game.cpp $(INCLUDE_DIR)/game.h
+	$(CC) $(CFLAGS) -c $< -o $@
 
-network.o: network.cpp network.h
-	$(CC) $(CFLAGS) -c network.cpp
+$(BUILD_DIR)/network.o: $(SRC_DIR)/network.cpp $(INCLUDE_DIR)/network.h
+	$(CC) $(CFLAGS) -c $< -o $@
 
-# ImGui object files (assuming these files are in the directory)
-imgui.o: imgui.cpp imgui.h
-	$(CC) $(CFLAGS) -c imgui.cpp
+# ImGui object files
+$(BUILD_DIR)/imgui.o: $(SRC_DIR)/imgui.cpp $(INCLUDE_DIR)/imgui.h
+	$(CC) $(CFLAGS) -c $< -o $@
 
-imgui_draw.o: imgui_draw.cpp imgui.h
-	$(CC) $(CFLAGS) -c imgui_draw.cpp
+$(BUILD_DIR)/imgui_draw.o: $(SRC_DIR)/imgui_draw.cpp $(INCLUDE_DIR)/imgui.h
+	$(CC) $(CFLAGS) -c $< -o $@
 
-imgui_widgets.o: imgui_widgets.cpp imgui.h
-	$(CC) $(CFLAGS) -c imgui_widgets.cpp
+$(BUILD_DIR)/imgui_widgets.o: $(SRC_DIR)/imgui_widgets.cpp $(INCLUDE_DIR)/imgui.h
+	$(CC) $(CFLAGS) -c $< -o $@
 
-imgui_tables.o: imgui_tables.cpp imgui.h
-	$(CC) $(CFLAGS) -c imgui_tables.cpp
+$(BUILD_DIR)/imgui_tables.o: $(SRC_DIR)/imgui_tables.cpp $(INCLUDE_DIR)/imgui.h
+	$(CC) $(CFLAGS) -c $< -o $@
 
-imgui_impl_sdl2.o: imgui_impl_sdl2.cpp imgui_impl_sdl2.h
-	$(CC) $(CFLAGS) -c imgui_impl_sdl2.cpp
+$(BUILD_DIR)/imgui_impl_sdl2.o: $(SRC_DIR)/imgui_impl_sdl2.cpp $(INCLUDE_DIR)/imgui_impl_sdl2.h
+	$(CC) $(CFLAGS) -c $< -o $@
 
-imgui_impl_sdlrenderer2.o: imgui_impl_sdlrenderer2.cpp imgui_impl_sdlrenderer2.h
-	$(CC) $(CFLAGS) -c imgui_impl_sdlrenderer2.cpp
+$(BUILD_DIR)/imgui_impl_sdlrenderer2.o: $(SRC_DIR)/imgui_impl_sdlrenderer2.cpp $(INCLUDE_DIR)/imgui_impl_sdlrenderer2.h
+	$(CC) $(CFLAGS) -c $< -o $@
 
 # Clean up
 clean:
-	rm -f *.o server client
+	rm -f $(BUILD_DIR)/*.o $(BUILD_DIR)/server $(BUILD_DIR)/client
 
 .PHONY: all clean
