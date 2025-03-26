@@ -1,6 +1,11 @@
-#include "client.h"
+#include "../include/client.h"
 #include <iostream>
 #include <chrono>
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_ttf.h>
+#include "imgui.h"
+#include "imgui_impl_sdl2.h"
+#include "imgui_impl_sdlrenderer2.h"
 using namespace std;
 
 const int WINDOW_WIDTH = 800;
@@ -25,7 +30,6 @@ GameState state = GameState::DISCONNECTED;
 bool isAI = false;
 string opponentName;
 
-// Forward declaration of helper function
 Piece getOpponentPiece(Piece piece);
 
 bool initSDL() {
@@ -48,7 +52,7 @@ bool initSDL() {
         cerr << "SDL_ttf could not initialize! TTF_Error: " << TTF_GetError() << "\n";
         return false;
     }
-    font = TTF_OpenFont("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 24); // Adjust path if needed
+    font = TTF_OpenFont("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 24);
     if (!font) {
         cerr << "Failed to load font! TTF_Error: " << TTF_GetError() << "\n";
         return false;
@@ -71,9 +75,9 @@ void closeSDL() {
 }
 
 void drawBoard(const Board& board) {
-    SDL_SetRenderDrawColor(renderer, 245, 222, 179, 255); // Wheat color
+    SDL_SetRenderDrawColor(renderer, 245, 222, 179, 255);
     SDL_RenderClear(renderer);
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255); // Black lines
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     for (int i = 0; i <= GRID_SIZE; i++) {
         SDL_RenderDrawLine(renderer, BOARD_OFFSET_X, BOARD_OFFSET_Y + i * CELL_SIZE, 
                            BOARD_OFFSET_X + GRID_SIZE * CELL_SIZE, BOARD_OFFSET_Y + i * CELL_SIZE);
@@ -121,7 +125,7 @@ int HumanPlayer::getMove(const Board& b) {
         ImGui::Text("Your turn as %s vs %s", piece == Piece::BLACK ? "Black" : "White", opponentName.c_str());
         ImGui::End();
         ImGui::Render();
-        ImGui_ImplSDLRenderer2_RenderDrawData(ImGui::GetDrawData(), renderer); // Added renderer argument
+        ImGui_ImplSDLRenderer2_RenderDrawData(ImGui::GetDrawData(), renderer);
         SDL_RenderPresent(renderer);
         SDL_Delay(10);
     }
@@ -172,13 +176,14 @@ void Client::run() {
 
         string message = (sock != -1) ? Network::receiveData(sock) : "";
         if (!message.empty()) {
+            cout << "Received in main loop: " << message << "\n";
             auto tokens = split(message, '~');
             if (tokens[0] == "NEWGAME") {
                 myPiece = tokens[1] == username ? Piece::BLACK : Piece::WHITE;
                 opponentName = tokens[1] == username ? tokens[2] : tokens[1];
                 myTurn = myPiece == Piece::BLACK;
                 state = GameState::IN_GAME;
-                board = Board(); // Reset board
+                board = Board();
             } else if (tokens[0] == "MOVE" && state == GameState::IN_GAME) {
                 int move = stoi(tokens[1]);
                 board.makeMove(move, myTurn ? myPiece : getOpponentPiece(myPiece));
@@ -215,14 +220,32 @@ void Client::run() {
                     username = userBuf;
                     sock = Network::createClientSocket(ip, port);
                     if (sock != -1) {
-                        Network::sendData(sock, "HELLO~CaptureGo Client");
-                        Network::receiveData(sock);
-                        Network::sendData(sock, "LOGIN~" + username);
-                        string response = Network::receiveData(sock);
-                        if (response == "LOGIN") {
-                            state = GameState::CONNECTED_MENU;
+                        cout << "Sending: HELLO~CaptureGo Client\n";
+                        Network::sendData(sock, "HELLO~CaptureGo Client\n");
+                        string helloResponse;
+                        for (int i = 0; i < 5; ++i) {
+                            helloResponse = Network::receiveData(sock);
+                            if (!helloResponse.empty()) break;
+                            SDL_Delay(100);
+                        }
+                        cout << "Received after HELLO: " << helloResponse << "\n";
+                        if (helloResponse == "HELLO~CaptureGo Server\n") {
+                            cout << "Sending: LOGIN~" << username << "\n";
+                            Network::sendData(sock, "LOGIN~" + username + "\n");
+                            string response;
+                            for (int i = 0; i < 5; ++i) {
+                                response = Network::receiveData(sock);
+                                if (!response.empty()) break;
+                                SDL_Delay(100);
+                            }
+                            cout << "Received after LOGIN: " << response << "\n";
+                            if (response == "LOGIN\n") {
+                                state = GameState::CONNECTED_MENU;
+                            } else {
+                                ImGui::OpenPopup("Login Failed");
+                            }
                         } else {
-                            ImGui::OpenPopup("Login Failed");
+                            ImGui::OpenPopup("Connection Failed");
                         }
                     } else {
                         ImGui::OpenPopup("Connection Failed");
@@ -244,12 +267,12 @@ void Client::run() {
                 ImGui::Begin("Menu");
                 if (ImGui::Button("Play as Human")) {
                     isAI = false;
-                    Network::sendData(sock, "QUEUE");
+                    Network::sendData(sock, "QUEUE\n");
                     state = GameState::IN_QUEUE;
                 }
                 if (ImGui::Button("Play as AI")) {
                     isAI = true;
-                    Network::sendData(sock, "QUEUE");
+                    Network::sendData(sock, "QUEUE\n");
                     state = GameState::IN_QUEUE;
                 }
                 if (ImGui::Button("Disconnect")) {
@@ -272,12 +295,12 @@ void Client::run() {
                     if (isAI) {
                         AIPlayer player(sock, username, myPiece);
                         int move = player.getMove(board);
-                        Network::sendData(sock, "MOVE~" + to_string(move));
+                        Network::sendData(sock, "MOVE~" + to_string(move) + "\n");
                     } else {
                         HumanPlayer player(sock, username, myPiece);
                         int move = player.getMove(board);
                         if (move != -1) {
-                            Network::sendData(sock, "MOVE~" + to_string(move));
+                            Network::sendData(sock, "MOVE~" + to_string(move) + "\n");
                         }
                     }
                 } else {
@@ -309,9 +332,9 @@ void Client::run() {
         SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
         SDL_RenderClear(renderer);
         ImGui::Render();
-        ImGui_ImplSDLRenderer2_RenderDrawData(ImGui::GetDrawData(), renderer); // Added renderer argument
+        ImGui_ImplSDLRenderer2_RenderDrawData(ImGui::GetDrawData(), renderer);
         SDL_RenderPresent(renderer);
-        SDL_Delay(16); // ~60 FPS
+        SDL_Delay(16);
     }
 
     if (sock != -1) Network::closeSocket(sock);

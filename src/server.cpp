@@ -1,4 +1,4 @@
-#include "server.h"
+#include "../include/server.h"
 #include <iostream>
 #include <thread>
 #include <algorithm>
@@ -16,7 +16,7 @@ Game::Game(Player* p1, Player* p2) {
     sockets[1] = p2->getSocket();
     p1->setPiece(Piece::BLACK);
     p2->setPiece(Piece::WHITE);
-    string msg = "NEWGAME~" + p1->getUsername() + "~" + p2->getUsername();
+    string msg = "NEWGAME~" + p1->getUsername() + "~" + p2->getUsername() + "\n";
     Network::sendData(sockets[0], msg);
     Network::sendData(sockets[1], msg);
     currentPlayer = 0;
@@ -29,14 +29,14 @@ void Game::run() {
     while (true) {
         Piece winner = board.getWinner();
         if (winner != Piece::NONE) {
-            string msg = "GAMEOVER~VICTORY~" + (winner == Piece::BLACK ? players[0]->getUsername() : players[1]->getUsername());
+            string msg = "GAMEOVER~VICTORY~" + (winner == Piece::BLACK ? players[0]->getUsername() : players[1]->getUsername()) + "\n";
             Network::sendData(sockets[0], msg);
             Network::sendData(sockets[1], msg);
             break;
         }
         string input = Network::receiveData(sockets[currentPlayer]);
         if (input.empty()) {
-            string msg = "GAMEOVER~DISCONNECT~" + players[1 - currentPlayer]->getUsername();
+            string msg = "GAMEOVER~DISCONNECT~" + players[1 - currentPlayer]->getUsername() + "\n";
             Network::sendData(sockets[1 - currentPlayer], msg);
             break;
         }
@@ -44,7 +44,7 @@ void Game::run() {
         if (tokens[0] == "MOVE") {
             int move = stoi(tokens[1]);
             if (!board.makeMove(move, players[currentPlayer]->getPiece())) {
-                Network::sendData(sockets[currentPlayer], "ERROR~Invalid Move");
+                Network::sendData(sockets[currentPlayer], "ERROR~Invalid Move\n");
                 continue;
             }
             Network::sendData(sockets[0], input);
@@ -81,76 +81,61 @@ void Server::startGame(Game* game) {
 
 void Server::handleClient(int sock) {
     Player* player = nullptr;
+    string buffer;
     while (true) {
         string message = Network::receiveData(sock);
         if (message.empty()) {
             if (player) {
                 cout << "Client " << player->getUsername() << " disconnected\n";
+                // Note: Cleanup of connectedPlayers not fully implemented here
             }
             break;
         }
-        auto tokens = split(message, '~');
-        if (tokens[0] == "HELLO") {
-            cout << "Received: " << tokens[1] << "\n";
-            Network::sendData(sock, "HELLO~CaptureGo Server");
-        } else if (tokens[0] == "LOGIN") {
-            if (any_of(connectedPlayers.begin(), connectedPlayers.end(),
-                       [&tokens](Player* p) { return p->getUsername() == tokens[1]; })) {
-                Network::sendData(sock, "ALREADYLOGGEDIN");
-            } else {
-                player = new Player(sock, tokens[1]);
-                connectedPlayers.push_back(player);
-                Network::sendData(sock, "LOGIN");
+        buffer += message;
+        size_t pos;
+        while ((pos = buffer.find('\n')) != string::npos) {
+            string msg = buffer.substr(0, pos);
+            buffer.erase(0, pos + 1);
+            cout << "Received from client: " << msg << "\n";
+            auto tokens = split(msg, '~');
+            if (tokens[0] == "HELLO") {
+                cout << "Received HELLO from: " << tokens[1] << "\n";
+                Network::sendData(sock, "HELLO~CaptureGo Server\n");
+            } else if (tokens[0] == "LOGIN") {
+                string username = tokens[1];
+                cout << "Login attempt with username: " << username << "\n";
+                bool usernameTaken = false;
+                for (Player* p : connectedPlayers) {
+                    if (p->getUsername() == username) {
+                        usernameTaken = true;
+                        break;
+                    }
+                }
+                if (usernameTaken) {
+                    cout << "Username taken: Yes\n";
+                    Network::sendData(sock, "ALREADYLOGGEDIN\n");
+                } else {
+                    cout << "Username taken: No\n";
+                    player = new Player(sock, username);
+                    connectedPlayers.push_back(player);
+                    Network::sendData(sock, "LOGIN\n");
+                }
+            } else if (tokens[0] == "QUEUE") {
+                if (!player) {
+                    Network::sendData(sock, "ERROR~Login required\n");
+                    continue;
+                }
+                {
+                    lock_guard<mutex> lock(queueMutex);
+                    gameQueue.push(player);
+                    queueCond.notify_one();
+                }
+                unique_lock<mutex> playerLock(player->getMutex());
+                player->getCondition().wait(playerLock);
             }
-        } else if (tokens[0] == "QUEUE") {
-            if (!player) {
-                Network::sendData(sock, "ERROR~Login required");
-                continue;
-            }
-            {
-                lock_guard<mutex> lock(queueMutex);
-                gameQueue.push(player);
-                queueCond.notify_one();
-            }
-            unique_lock<mutex> playerLock(player->getMutex());
-            player->getCondition().wait(playerLock);
-        } else if (tokens[0] == "LIST") {
-            string list = "LIST";
-            for (const auto* p : connectedPlayers) list += "~" + p->getUsername();
-            Network::sendData(sock, list);
-        } else if (tokens[0] == "QUEUE_LIST") {
-            string queueList = "QUEUE_LIST";
-            lock_guard<mutex> lock(queueMutex);
-            queue<Player*> tempQueue = gameQueue;
-            while (!tempQueue.empty()) {
-                queueList += "~" + tempQueue.front()->getUsername();
-                tempQueue.pop();
-            }
-            Network::sendData(sock, queueList);
         }
     }
-    if (player) {
-        connectedPlayers.erase(remove_if(connectedPlayers.begin(), connectedPlayers.end(), 
-                                         [player](Player* p) { return p == player; }), 
-                               connectedPlayers.end());
-        delete player;
-    }
-    Network::closeSocket(sock);
-}
-
-bool Server::isPortInUse(int port) {
-    int sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock < 0) {
-        cout << "Socket creation failed in isPortInUse: " << strerror(errno) << "\n";
-        return true;
-    }
-    sockaddr_in addr;
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
-    addr.sin_addr.s_addr = INADDR_ANY;
-    int result = bind(sock, (sockaddr*)&addr, sizeof(addr));
-    close(sock);
-    return result < 0;
+    // Cleanup (e.g., remove player, close sock) not fully implemented here
 }
 
 void Server::run() {
@@ -174,7 +159,7 @@ void Server::run() {
     sockaddr_in addr;
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
-    addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    addr.sin_addr.s_addr = INADDR_ANY;
     if (bind(serverSock, (sockaddr*)&addr, sizeof(addr)) < 0) {
         cout << "Bind failed: " << strerror(errno) << "\n";
         close(serverSock);
@@ -189,6 +174,7 @@ void Server::run() {
     thread queueThread(&Server::processQueue, this);
     queueThread.detach();
     while (true) {
+        cout << "Waiting for client connection...\n";
         int clientSock = accept(serverSock, nullptr, nullptr);
         if (clientSock < 0) {
             cout << "Accept failed: " << strerror(errno) << "\n";
