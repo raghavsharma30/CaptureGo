@@ -1,6 +1,7 @@
 #include "../include/client.h"
 #include <iostream>
 #include <chrono>
+#include <random>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
 #include "imgui.h"
@@ -29,6 +30,7 @@ enum class GameState { DISCONNECTED, CONNECTING, CONNECTED_MENU, IN_QUEUE, IN_GA
 GameState state = GameState::DISCONNECTED;
 bool isAI = false;
 string opponentName;
+AIPlayer* aiPlayer = nullptr; 
 
 Piece getOpponentPiece(Piece piece);
 
@@ -75,9 +77,7 @@ void closeSDL() {
 }
 
 void drawBoard(const Board& board) {
-    SDL_SetRenderDrawColor(renderer, 245, 222, 179, 255);
-    SDL_RenderClear(renderer);
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255); 
     for (int i = 0; i <= GRID_SIZE; i++) {
         SDL_RenderDrawLine(renderer, BOARD_OFFSET_X, BOARD_OFFSET_Y + i * CELL_SIZE, 
                            BOARD_OFFSET_X + GRID_SIZE * CELL_SIZE, BOARD_OFFSET_Y + i * CELL_SIZE);
@@ -93,72 +93,33 @@ void drawBoard(const Board& board) {
                 SDL_SetRenderDrawColor(renderer, piece == Piece::BLACK ? 0 : 255, 
                                        piece == Piece::BLACK ? 0 : 255, piece == Piece::BLACK ? 0 : 255, 255);
                 SDL_Rect circle = {x - CELL_SIZE / 3, y - CELL_SIZE / 3, CELL_SIZE * 2 / 3, CELL_SIZE * 2 / 3};
-                SDL_RenderFillRect(renderer, &circle);
+                SDL_RenderFillRect(renderer, &circle); 
             }
         }
-    }
-}
-
-int HumanPlayer::getMove(const Board& b) {
-    SDL_Event e;
-    while (true) {
-        while (SDL_PollEvent(&e) != 0) {
-            ImGui_ImplSDL2_ProcessEvent(&e);
-            if (e.type == SDL_QUIT) {
-                quit = true;
-                return -1;
-            } else if (e.type == SDL_MOUSEBUTTONDOWN) {
-                int x = e.button.x;
-                int y = e.button.y;
-                if (x >= BOARD_OFFSET_X && x < BOARD_OFFSET_X + GRID_SIZE * CELL_SIZE &&
-                    y >= BOARD_OFFSET_Y && y < BOARD_OFFSET_Y + GRID_SIZE * CELL_SIZE) {
-                    int col = (x - BOARD_OFFSET_X) / CELL_SIZE;
-                    int row = (y - BOARD_OFFSET_Y) / CELL_SIZE;
-                    if (b.checkMove(row, col)) {
-                        return row * 7 + col;
-                    }
-                }
-            }
-        }
-        drawBoard(b);
-        ImGui::Begin("Status");
-        ImGui::Text("Your turn as %s vs %s", piece == Piece::BLACK ? "Black" : "White", opponentName.c_str());
-        ImGui::End();
-        ImGui::Render();
-        ImGui_ImplSDLRenderer2_RenderDrawData(ImGui::GetDrawData(), renderer);
-        SDL_RenderPresent(renderer);
-        SDL_Delay(10);
     }
 }
 
 AIPlayer::AIPlayer(int socket, const string& username) 
     : ClientPlayer(socket, username), rng(chrono::system_clock::now().time_since_epoch().count()) {}
+
 AIPlayer::AIPlayer(int socket, const string& username, Piece piece) 
     : ClientPlayer(socket, username, piece), rng(chrono::system_clock::now().time_since_epoch().count()) {}
+
 int AIPlayer::getMove(const Board& b) {
-    auto chains = b.listChainsAndLiberties();
-    const ChainAndLiberties* target = nullptr;
-    size_t minLiberties = numeric_limits<size_t>::max();
-    for (const auto& chain : chains) {
-        if (chain.getPiece() != piece && chain.getLiberties().size() < minLiberties) {
-            minLiberties = chain.getLiberties().size();
-            target = &chain;
+    uniform_int_distribution<int> dist(0, GRID_SIZE * GRID_SIZE - 1); 
+    for (int i = 0; i < 100; ++i) { 
+        int move = dist(rng);
+        int row = move / GRID_SIZE;
+        int col = move % GRID_SIZE;
+        if (b.checkMove(row, col)) {
+            return move;
         }
     }
-    if (!target || target->getLiberties().empty()) {
-        uniform_int_distribution<int> dist(0, 48);
-        while (true) {
-            int move = dist(rng);
-            if (b.checkMove(move / 7, move % 7)) {
-                return move;
-            }
-        }
-    } else {
-        vector<Point> libs(target->getLiberties().begin(), target->getLiberties().end());
-        uniform_int_distribution<size_t> dist(0, libs.size() - 1);
-        Point move = libs[dist(rng)];
-        return move.x * 7 + move.y;
-    }
+    return -1;
+}
+
+int HumanPlayer::getMove(const Board& b) {
+    return -1; 
 }
 
 void Client::run() {
@@ -171,28 +132,64 @@ void Client::run() {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             ImGui_ImplSDL2_ProcessEvent(&e);
-            if (e.type == SDL_QUIT) quit = true;
+            if (e.type == SDL_QUIT) {
+                quit = true;
+            }
+            else if (e.type == SDL_MOUSEBUTTONDOWN && state == GameState::IN_GAME && myTurn && !isAI) {
+                int x = e.button.x;
+                int y = e.button.y;
+                if (x >= BOARD_OFFSET_X && x < BOARD_OFFSET_X + GRID_SIZE * CELL_SIZE &&
+                    y >= BOARD_OFFSET_Y && y < BOARD_OFFSET_Y + GRID_SIZE * CELL_SIZE) {
+                    int col = (x - BOARD_OFFSET_X) / CELL_SIZE;
+                    int row = (y - BOARD_OFFSET_Y) / CELL_SIZE;
+                    if (board.checkMove(row, col)) {
+                        int move = row * GRID_SIZE + col;
+                        Network::sendData(sock, "MOVE~" + to_string(move) + "\n");
+                        myTurn = false; 
+                    }
+                }
+            }
         }
 
         string message = (sock != -1) ? Network::receiveData(sock) : "";
         if (!message.empty()) {
-            cout << "Received in main loop: " << message << "\n";
+            cout << "Received: " << message << "\n";
             auto tokens = split(message, '~');
             if (tokens[0] == "NEWGAME") {
-                myPiece = tokens[1] == username ? Piece::BLACK : Piece::WHITE;
-                opponentName = tokens[1] == username ? tokens[2] : tokens[1];
-                myTurn = myPiece == Piece::BLACK;
+                cout << "Starting new game with " << tokens[1] << " and " << tokens[2] << "\n";
+                myPiece = (tokens[1] == username) ? Piece::BLACK : Piece::WHITE;
+                opponentName = (tokens[1] == username) ? tokens[2] : tokens[1];
+                myTurn = (myPiece == Piece::BLACK);
                 state = GameState::IN_GAME;
                 board = Board();
-            } else if (tokens[0] == "MOVE" && state == GameState::IN_GAME) {
+                if (isAI && aiPlayer == nullptr) {
+                    aiPlayer = new AIPlayer(sock, username, myPiece);
+                }
+            }
+            else if (tokens[0] == "MOVE" && state == GameState::IN_GAME) {
                 int move = stoi(tokens[1]);
-                board.makeMove(move, myTurn ? myPiece : getOpponentPiece(myPiece));
-                myTurn = !myTurn;
-            } else if (tokens[0] == "ERROR" && state == GameState::IN_GAME) {
-                ImGui::OpenPopup("Invalid Move");
-            } else if (tokens[0] == "GAMEOVER") {
+                int row = move / GRID_SIZE;
+                int col = move % GRID_SIZE;
+                board.makeMove(row, col, getOpponentPiece(myPiece));
+                myTurn = true;
+            }
+            else if (tokens[0] == "ERROR" && state == GameState::IN_GAME) {
+                if (tokens[1] == "Invalid Move") {
+                    ImGui::OpenPopup("Invalid Move");
+                    myTurn = true;
+                }
+            }
+            else if (tokens[0] == "GAMEOVER") {
+                cout << "Received GAMEOVER: " << tokens[1] << "\n";
                 state = GameState::GAME_OVER;
             }
+        }
+
+        SDL_SetRenderDrawColor(renderer, 245, 222, 179, 255);  
+        SDL_RenderClear(renderer);
+s
+        if (state == GameState::IN_GAME || state == GameState::GAME_OVER) {
+            drawBoard(board);
         }
 
         ImGui_ImplSDLRenderer2_NewFrame();
@@ -206,6 +203,7 @@ void Client::run() {
                 if (ImGui::Button("Exit")) quit = true;
                 ImGui::End();
                 break;
+
             case GameState::CONNECTING:
                 ImGui::Begin("Connect");
                 static char ipBuf[64] = "127.0.0.1";
@@ -220,7 +218,6 @@ void Client::run() {
                     username = userBuf;
                     sock = Network::createClientSocket(ip, port);
                     if (sock != -1) {
-                        cout << "Sending: HELLO~CaptureGo Client\n";
                         Network::sendData(sock, "HELLO~CaptureGo Client\n");
                         string helloResponse;
                         for (int i = 0; i < 5; ++i) {
@@ -230,7 +227,6 @@ void Client::run() {
                         }
                         cout << "Received after HELLO: " << helloResponse << "\n";
                         if (helloResponse == "HELLO~CaptureGo Server\n") {
-                            cout << "Sending: LOGIN~" << username << "\n";
                             Network::sendData(sock, "LOGIN~" + username + "\n");
                             string response;
                             for (int i = 0; i < 5; ++i) {
@@ -263,6 +259,7 @@ void Client::run() {
                 }
                 ImGui::End();
                 break;
+
             case GameState::CONNECTED_MENU:
                 ImGui::Begin("Menu");
                 if (ImGui::Button("Play as Human")) {
@@ -282,39 +279,41 @@ void Client::run() {
                 }
                 ImGui::End();
                 break;
+
             case GameState::IN_QUEUE:
                 ImGui::Begin("Queue");
                 ImGui::Text("Waiting for an opponent...");
                 ImGui::End();
                 break;
+
             case GameState::IN_GAME:
-                drawBoard(board);
                 ImGui::Begin("Status");
                 if (myTurn) {
                     ImGui::Text("Your turn as %s vs %s", myPiece == Piece::BLACK ? "Black" : "White", opponentName.c_str());
-                    if (isAI) {
-                        AIPlayer player(sock, username, myPiece);
-                        int move = player.getMove(board);
-                        Network::sendData(sock, "MOVE~" + to_string(move) + "\n");
-                    } else {
-                        HumanPlayer player(sock, username, myPiece);
-                        int move = player.getMove(board);
-                        if (move != -1) {
+                    if (isAI && aiPlayer != nullptr) {
+                        int move = aiPlayer->getMove(board);
+                        if (board.checkMove(move / GRID_SIZE, move % GRID_SIZE)) {
                             Network::sendData(sock, "MOVE~" + to_string(move) + "\n");
+                            myTurn = false; 
                         }
+                    } else if (!isAI) {
+                        ImGui::Text("Click the board to place your stone.");
                     }
                 } else {
                     ImGui::Text("Opponent's turn (%s)", opponentName.c_str());
                 }
-                if (ImGui::BeginPopupModal("Invalid Move")) {
+                ImGui::End();
+
+                if (ImGui::BeginPopupModal("Invalid Move", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
                     ImGui::Text("Invalid move! Try again.");
-                    if (ImGui::Button("OK")) ImGui::CloseCurrentPopup();
+                    if (ImGui::Button("OK")) {
+                        ImGui::CloseCurrentPopup();
+                    }
                     ImGui::EndPopup();
                 }
-                ImGui::End();
                 break;
+
             case GameState::GAME_OVER:
-                drawBoard(board);
                 ImGui::Begin("Game Over");
                 Piece winner = board.getWinner();
                 if (winner == myPiece) {
@@ -324,19 +323,30 @@ void Client::run() {
                 } else {
                     ImGui::Text("Game ended (disconnected?)");
                 }
-                if (ImGui::Button("Back to Menu")) state = GameState::CONNECTED_MENU;
+                if (ImGui::Button("Back to Menu")) {
+                    state = GameState::CONNECTED_MENU;
+                    if (aiPlayer) {
+                        delete aiPlayer;
+                        aiPlayer = nullptr; 
+                    }
+                }
                 ImGui::End();
                 break;
         }
 
-        SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-        SDL_RenderClear(renderer);
+
         ImGui::Render();
         ImGui_ImplSDLRenderer2_RenderDrawData(ImGui::GetDrawData(), renderer);
+
         SDL_RenderPresent(renderer);
+
         SDL_Delay(16);
     }
 
+    if (aiPlayer) {
+        delete aiPlayer;
+        aiPlayer = nullptr;
+    }
     if (sock != -1) Network::closeSocket(sock);
     closeSDL();
 }

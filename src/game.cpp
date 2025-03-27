@@ -1,5 +1,4 @@
 #include "../include/game.h"
-// ... rest unchanged
 #include <iostream>
 #include <iomanip>
 using namespace std;

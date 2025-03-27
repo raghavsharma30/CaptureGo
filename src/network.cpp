@@ -1,14 +1,14 @@
 #include "../include/network.h"
-#include <sys/socket.h>    // For socket(), connect(), etc.
-#include <netinet/in.h>    // For sockaddr_in, htons(), etc.
-#include <arpa/inet.h>     // For inet_addr()
-#include <unistd.h>        // For close()
-#include <fcntl.h>         // For fcntl()
-#include <poll.h>          // For poll()
-#include <errno.h>         // For errno
-#include <string.h>        // For strerror()
-#include <iostream>        // For cout
-#include <string>          // For std::string
+#include <sys/socket.h>    
+#include <netinet/in.h>   
+#include <arpa/inet.h>     
+#include <unistd.h>        
+#include <fcntl.h>         
+#include <poll.h>          
+#include <errno.h>         
+#include <string.h>        
+#include <iostream>       
+#include <string>         
 using namespace std;
 
 int Network::createClientSocket(const string& hostname, int port) {
@@ -17,7 +17,6 @@ int Network::createClientSocket(const string& hostname, int port) {
         cout << "Failed to create client socket: " << strerror(errno) << "\n";
         return -1;
     }
-    
     int flags = fcntl(sock, F_GETFL, 0);
     fcntl(sock, F_SETFL, flags | O_NONBLOCK);
 
@@ -54,7 +53,6 @@ int Network::createClientSocket(const string& hostname, int port) {
         }
     }
 
-    // Keep socket non-blocking (as per previous fix for GUI hang)
     return sock;
 }
 
@@ -69,7 +67,7 @@ string Network::receiveData(int socket) {
 
 void Network::sendData(int socket, const string& data) {
     send(socket, data.c_str(), data.size(), 0);
-    fsync(socket);  // Ensure data is sent immediately
+    fsync(socket); 
 }
 
 void Network::closeSocket(int socket) {
