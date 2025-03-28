@@ -31,7 +31,3 @@
     cd build
     ./server
     ./client
-
-    
-
-
