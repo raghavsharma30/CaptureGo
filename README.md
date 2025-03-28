@@ -23,6 +23,15 @@
     make
  3. **Run client and server**:
     ```bash
+    ./build/server
+    ./build/client
+
+    or
+    
     cd build
     ./server
     ./client
+
+    
+
+
