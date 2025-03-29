@@ -9,7 +9,6 @@
 #include <string.h>
 using namespace std;
 
-// Game constructor
 Game::Game(Player* p1, Player* p2) {
     players[0] = p1;
     players[1] = p2;
@@ -24,7 +23,6 @@ Game::Game(Player* p1, Player* p2) {
     currentPlayer = 0;
 }
 
-// Game loop
 void Game::run() {
     unique_lock<mutex> lock1(players[0]->getMutex(), defer_lock);
     unique_lock<mutex> lock2(players[1]->getMutex(), defer_lock);
@@ -40,7 +38,7 @@ void Game::run() {
         }
         string input = Network::receiveData(sockets[currentPlayer]);
         if (input.empty()) {
-            string msg = "GAMEOVER~DISCONNECT~" + players[1 - currentPlayer]->getUsername() + "\n";
+            string msg = "GAMEOVER~DISCONNECT~" + players[currentPlayer]->getUsername() + "\n";
             cout << "Sending GAMEOVER: Disconnection of " << players[currentPlayer]->getUsername() << "\n";
             Network::sendData(sockets[1 - currentPlayer], msg);
             break;
@@ -48,12 +46,18 @@ void Game::run() {
         auto tokens = split(input, '~');
         if (tokens[0] == "MOVE") {
             int move = stoi(tokens[1]);
-            if (!board.makeMove(move, players[currentPlayer]->getPiece())) {
+            int x = move / 7;
+            int y = move % 7;
+            if (board.getPiece(x, y) != Piece::NONE || !board.checkMove(x, y)) {
                 Network::sendData(sockets[currentPlayer], "ERROR~Invalid Move\n");
                 continue;
             }
-            Network::sendData(sockets[0], input);
-            Network::sendData(sockets[1], input);
+            Piece piece = players[currentPlayer]->getPiece();
+            board.makeMove(x, y, piece);
+            cout << "Move accepted: " << move << " by " << players[currentPlayer]->getUsername() << "\n";
+            string moveMsg = "MOVE~" + to_string(move) + "~" + (piece == Piece::BLACK ? "BLACK" : "WHITE") + "\n";
+            Network::sendData(sockets[0], moveMsg);
+            Network::sendData(sockets[1], moveMsg);
             currentPlayer = 1 - currentPlayer;
         }
     }
@@ -61,25 +65,19 @@ void Game::run() {
     players[1]->getCondition().notify_one();
 }
 
-// Process the player queue
 void Server::processQueue() {
     while (true) {
-        Game* game = waitForPlayers();
-        if (game) startGame(game);
+        unique_lock<mutex> lock(queueMutex);
+        queueCond.wait(lock, [this] { return gameQueue.size() >= 2; });
+        Player* p1 = gameQueue.front(); gameQueue.pop();
+        Player* p2 = gameQueue.front(); gameQueue.pop();
+        lock.unlock();
+        cout << "Game started between " << p1->getUsername() << " and " << p2->getUsername() << "\n";
+        Game* game = new Game(p1, p2);
+        startGame(game);
     }
 }
 
-// Wait for two players to start a game
-Game* Server::waitForPlayers() {
-    unique_lock<mutex> lock(queueMutex);
-    queueCond.wait(lock, [this] { return gameQueue.size() >= 2; });
-    Player* p1 = gameQueue.front(); gameQueue.pop();
-    Player* p2 = gameQueue.front(); gameQueue.pop();
-    cout << "Game started between " << p1->getUsername() << " and " << p2->getUsername() << "\n";
-    return new Game(p1, p2);
-}
-
-// Start a game in a new thread
 void Server::startGame(Game* game) {
     thread([game] {
         game->run();
@@ -87,7 +85,6 @@ void Server::startGame(Game* game) {
     }).detach();
 }
 
-// Handle client connections
 void Server::handleClient(int sock) {
     Player* player = nullptr;
     string buffer;
@@ -96,6 +93,19 @@ void Server::handleClient(int sock) {
         if (message.empty()) {
             if (player) {
                 cout << "Client " << player->getUsername() << " disconnected\n";
+                lock_guard<mutex> lock(queueMutex);
+                connectedPlayers.erase(
+                    remove_if(connectedPlayers.begin(), connectedPlayers.end(),
+                              [player](Player* p) { return p->getUsername() == player->getUsername(); }),
+                    connectedPlayers.end());
+                queue<Player*> tempQueue;
+                while (!gameQueue.empty()) {
+                    Player* p = gameQueue.front();
+                    gameQueue.pop();
+                    if (p != player) tempQueue.push(p);
+                }
+                gameQueue = tempQueue;
+                delete player;
             }
             break;
         }
@@ -110,6 +120,7 @@ void Server::handleClient(int sock) {
                 Network::sendData(sock, "HELLO~CaptureGo Server\n");
             } else if (tokens[0] == "LOGIN") {
                 string username = tokens[1];
+                lock_guard<mutex> lock(queueMutex);
                 bool usernameTaken = false;
                 for (Player* p : connectedPlayers) {
                     if (p->getUsername() == username) {
@@ -124,7 +135,29 @@ void Server::handleClient(int sock) {
                     connectedPlayers.push_back(player);
                     Network::sendData(sock, "LOGIN\n");
                 }
-            } else if (tokens[0] == "QUEUE") {
+            } else if (msg == "LISTUSERS") {
+                lock_guard<mutex> lock(queueMutex);
+                string userList = "USERLIST~";
+                for (Player* p : connectedPlayers) userList += p->getUsername() + ",";
+                if (!connectedPlayers.empty()) userList.pop_back();
+                userList += "\n";
+                Network::sendData(sock, userList);
+            } else if (msg == "LISTQUEUE") {
+                lock_guard<mutex> lock(queueMutex);
+                string queueList = "QUEUELIST~";
+                if (gameQueue.empty()) {
+                    queueList += "No players in queue.\n";
+                } else {
+                    queue<Player*> temp = gameQueue;
+                    while (!temp.empty()) {
+                        queueList += temp.front()->getUsername() + ",";
+                        temp.pop();
+                    }
+                    queueList.pop_back();
+                    queueList += "\n";
+                }
+                Network::sendData(sock, queueList);
+            } else if (msg == "QUEUE") {
                 if (!player) {
                     Network::sendData(sock, "ERROR~Login required\n");
                     continue;
@@ -142,7 +175,6 @@ void Server::handleClient(int sock) {
     Network::closeSocket(sock);
 }
 
-// Server main loop
 void Server::run() {
     int port = 8081;
     string input;
@@ -183,4 +215,16 @@ void Server::run() {
         cout << "Client connected\n";
         thread(&Server::handleClient, this, clientSock).detach();
     }
+}
+
+bool Server::isPortInUse(int port) {
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) return false;
+    sockaddr_in addr;
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    addr.sin_addr.s_addr = INADDR_ANY;
+    bool inUse = bind(sock, (sockaddr*)&addr, sizeof(addr)) < 0;
+    close(sock);
+    return inUse;
 }

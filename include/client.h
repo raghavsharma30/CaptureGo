@@ -12,9 +12,9 @@ using namespace std;
 
 class ClientPlayer {
 protected:
-    int socket;           
-    string username;       
-    Piece piece;          
+    int socket;            // Matches initialization order
+    string username;       // Matches initialization order
+    Piece piece;           // Matches initialization order
 public:
     ClientPlayer(int socket, const string& username) : socket(socket), username(username), piece(Piece::NONE) {}
     ClientPlayer(int socket, const string& username, Piece piece) : socket(socket), username(username), piece(piece) {}

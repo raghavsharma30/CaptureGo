@@ -62,6 +62,11 @@ string Network::receiveData(int socket) {
     if (bytes > 0) {
         return string(buffer, bytes);
     }
+    usleep(10000); // 10ms delay to allow data to arrive
+    bytes = recv(socket, buffer, sizeof(buffer) - 1, 0);
+    if (bytes > 0) {
+        return string(buffer, bytes);
+    }
     return "";
 }
 
